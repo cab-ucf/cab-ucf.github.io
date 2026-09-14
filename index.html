@@ -1,0 +1,35 @@
+<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>irweb</title>
+<style>
+body{font:18px system-ui,sans-serif;background:#111;color:#eee;margin:0;padding:2rem 1rem;max-width:30rem;margin:auto}
+input,button{font:inherit;padding:.8rem;border-radius:.5rem;border:1px solid #444;background:#222;color:#eee;width:100%;box-sizing:border-box;margin:.4rem 0}
+button{background:#2b6cb0;border:0}#s{color:#aaa;margin-top:1rem;white-space:pre-wrap}
+</style>
+<h2>irweb</h2>
+<form id="f" hidden><input id="k" placeholder="paste the code after #" autocomplete="off" spellcheck="false"><button>Open</button></form>
+<div id="s"></div>
+<script type="module">
+const base = new URL('.', location.href), S = document.getElementById('s'), F = document.getElementById('f');
+const say = t => S.textContent = t;
+F.onsubmit = e => { e.preventDefault(); go(document.getElementById('k').value.trim()); };
+async function go(frag) {
+  if (!('serviceWorker' in navigator)) return say('This browser has no Service Worker support (private mode?).');
+  const [seed, ...opts] = frag.replace(/^#/, '').split(';');
+  const relay = (opts.find(o => o.startsWith('r=')) || '').slice(2) || undefined;
+  try {
+    say('Starting...');
+    await navigator.serviceWorker.register(new URL('sw.js', base), { type: 'module', scope: base.pathname });
+    const sw = (await navigator.serviceWorker.ready).active;
+    const sid = await new Promise((res, rej) => {
+      const ch = new MessageChannel();
+      ch.port1.onmessage = ev => res(ev.data.sid);
+      sw.postMessage({ seed, relay }, [ch.port2]);
+      setTimeout(() => rej(new Error('service worker did not answer')), 8000);
+    });
+    say('Connecting...');
+    location.replace(new URL('x/' + sid + '/', base));
+  } catch (e) { say('Failed: ' + e.message); F.hidden = false; }
+}
+const h = location.hash.slice(1);
+if (h) go(h); else F.hidden = false;
+</script>
