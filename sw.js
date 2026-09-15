@@ -3,19 +3,30 @@
 // Classic worker, not an ES module: module service workers need Firefox 147+ and
 // Safari 16.4+, and students arrive on whatever browser they already have.
 const BASE = new URL(self.registration.scope).pathname;           // '/' or '/irweb/'
-importScripts(BASE + 'pkg/irweb_web.js');
+// Stamped by web/build.sh from the wasm hash. The glue and the binary are only valid as a
+// matched pair -- a stale one of either throws "__wasm_bindgen_func_elem_N is not a
+// function" -- so both are fetched under this version and the cache is named after it.
+const V = 'c946bdd5db96';
+const CACHE = 'irweb-bundle-' + V;
+importScripts(BASE + 'pkg/irweb_web.js?v=' + V);
 const { Client } = wasm_bindgen;
-const init = () => wasm_bindgen(BASE + 'pkg/irweb_web_bg.wasm');
+const init = () => wasm_bindgen({ module_or_path: BASE + 'pkg/irweb_web_bg.wasm?v=' + V });
 const BUNDLE = ['', 'index.html', 'sw.js', 'pkg/irweb_web.js', 'pkg/irweb_web_bg.wasm'].map(p => BASE + p);
 const REQ_SKIP = new Set(['connection', 'host', 'content-length', 'transfer-encoding', 'keep-alive', 'upgrade']);
 const RES_SKIP = new Set(['connection', 'content-length', 'transfer-encoding', 'keep-alive']);
 
 self.addEventListener('install', e => e.waitUntil((async () => {
-  const c = await caches.open('irweb-bundle');
-  await c.addAll(BUNDLE.filter(p => !p.endsWith('/')).concat(BASE));
+  const c = await caches.open(CACHE);
+  // 'reload' or a deploy can be installed straight back out of the HTTP cache.
+  await c.addAll(BUNDLE.filter(p => !p.endsWith('/')).concat(BASE)
+    .map(u => new Request(u, { cache: 'reload' })));
   await self.skipWaiting();
 })()));
-self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
+self.addEventListener('activate', e => e.waitUntil((async () => {
+  const keep = new Set([CACHE, 'irweb-sites']);
+  await Promise.all((await caches.keys()).filter(k => !keep.has(k)).map(k => caches.delete(k)));
+  await self.clients.claim();
+})()));
 
 self.addEventListener('message', e => {
   if (e.data?.seed) e.waitUntil(newSession(e.data, e.ports[0]));
@@ -38,7 +49,18 @@ function client(s) {
   const k = s.seed + '|' + (s.relay || '');
   if (!clients.has(k)) {
     clients.set(k, (async () => { await init(); return Client.connect(s.seed, s.relay || undefined); })()
-      .catch(err => { clients.delete(k); throw err; }));
+      .catch(async err => {
+        clients.delete(k);
+        // A glue/binary mismatch means this worker is outdated: an older copy of it is
+        // running against a bundle that has since been redeployed. Stand down so the next
+        // load installs a matched pair instead of showing this forever.
+        if (String(err?.message || err).includes('__wasm_bindgen_func_elem')) {
+          await Promise.all((await caches.keys()).map(k => caches.delete(k)));
+          await self.registration.unregister();
+          throw new Error('page was updated; reload to continue');
+        }
+        throw err;
+      }));
   }
   return clients.get(k);
 }
