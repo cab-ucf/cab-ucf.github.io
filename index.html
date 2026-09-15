@@ -18,7 +18,7 @@ async function go(frag) {
   const relay = (opts.find(o => o.startsWith('r=')) || '').slice(2) || undefined;
   try {
     say('Starting...');
-    await navigator.serviceWorker.register(new URL('sw.js', base), { type: 'module', scope: base.pathname });
+    await navigator.serviceWorker.register(new URL('sw.js', base), { scope: base.pathname });
     const sw = (await navigator.serviceWorker.ready).active;
     const sid = await new Promise((res, rej) => {
       const ch = new MessageChannel();

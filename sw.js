@@ -1,8 +1,11 @@
 // irweb service worker: every fetch under x/<sid>/ becomes one HTTP exchange over iroh.
 // State that must survive SW termination (sid -> seed) lives in the Cache API.
-import init, { Client } from './pkg/irweb_web.js';
-
+// Classic worker, not an ES module: module service workers need Firefox 147+ and
+// Safari 16.4+, and students arrive on whatever browser they already have.
 const BASE = new URL(self.registration.scope).pathname;           // '/' or '/irweb/'
+importScripts(BASE + 'pkg/irweb_web.js');
+const { Client } = wasm_bindgen;
+const init = () => wasm_bindgen(BASE + 'pkg/irweb_web_bg.wasm');
 const BUNDLE = ['', 'index.html', 'sw.js', 'pkg/irweb_web.js', 'pkg/irweb_web_bg.wasm'].map(p => BASE + p);
 const REQ_SKIP = new Set(['connection', 'host', 'content-length', 'transfer-encoding', 'keep-alive', 'upgrade']);
 const RES_SKIP = new Set(['connection', 'content-length', 'transfer-encoding', 'keep-alive']);
@@ -43,12 +46,13 @@ function client(s) {
 self.addEventListener('fetch', e => {
   const u = new URL(e.request.url);
   if (u.origin !== location.origin || !u.pathname.startsWith(BASE)) return;
-  if (BUNDLE.includes(u.pathname)) {
-    e.respondWith(caches.match(e.request).then(r => r || fetch(e.request)));
-    return;
-  }
   e.respondWith(route(e, u).catch(err => new Response('irweb: ' + (err?.message || err), { status: 502 })));
 });
+
+/// The landing page and its wasm, served from the install-time cache.
+const bundle = req => BUNDLE.includes(new URL(req.url).pathname)
+  ? caches.match(req).then(r => r || fetch(req))
+  : fetch(req);
 
 async function route(e, u) {
   const rel = u.pathname.slice(BASE.length);
@@ -58,10 +62,20 @@ async function route(e, u) {
     if (!m[2]) return Response.redirect(u.pathname + '/' + u.search, 302);
     sid = m[1]; path = m[2];
   } else {
-    // Absolute path (e.g. /style.css) requested by a page under x/<sid>/: resolve via the client.
-    const c = await self.clients.get(e.clientId || e.resultingClientId);
-    const mm = c && new URL(c.url).pathname.slice(BASE.length).match(/^x\/([a-z0-9]+)/);
-    if (!mm) return fetch(e.request);
+    // An absolute path (/style.css, or a link in a file listing) from a page under
+    // x/<sid>/. A navigation carries no usable clientId -- resultingClientId names a
+    // client that does not exist yet -- so fall back to the referrer, which is why
+    // clicking a link used to 404 while its stylesheets loaded.
+    const c = await self.clients.get(e.clientId);
+    const from = (c && c.url) || e.request.referrer || '';
+    const mm = from.startsWith(self.location.origin)
+      && new URL(from).pathname.slice(BASE.length).match(/^x\/([a-z0-9]+)/);
+    if (!mm) return bundle(e.request);
+    // Send navigations back under x/<sid>/ rather than answering at the bare path:
+    // the address bar is what the next click resolves against.
+    if (e.request.mode === 'navigate') {
+      return Response.redirect(BASE + 'x/' + mm[1] + '/' + rel + u.search, 302);
+    }
     sid = mm[1]; path = '/' + rel;
   }
   const s = await site(sid);
