@@ -6,7 +6,7 @@ input,button{font:inherit;padding:.8rem;border-radius:.5rem;border:1px solid #44
 button{background:#2b6cb0;border:0}#s{color:#aaa;margin-top:1rem;white-space:pre-wrap}
 </style>
 <h2>irweb</h2>
-<form id="f" hidden><input id="k" placeholder="paste the code after #" autocomplete="off" spellcheck="false"><button>Open</button></form>
+<form id="f" hidden><input id="k" placeholder="the code after #, or its words" autocomplete="off" spellcheck="false"><button>Open</button></form>
 <div id="s"></div>
 <script type="module">
 const base = new URL('.', location.href), S = document.getElementById('s'), F = document.getElementById('f');
@@ -30,6 +30,6 @@ async function go(frag) {
     location.replace(new URL('x/' + sid + '/', base));
   } catch (e) { say('Failed: ' + e.message); F.hidden = false; }
 }
-const h = location.hash.slice(1);
+const h = decodeURIComponent(location.hash.slice(1));
 if (h) go(h); else F.hidden = false;
 </script>
