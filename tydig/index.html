@@ -36,9 +36,11 @@ table{border-collapse:collapse;width:100%;font-size:.92em}td{padding:.25rem .5re
 <pre><code>#let R = json("build/results.json")
 The water was #if R.T1 &gt; R.T2 [cooling] else [heating].</code></pre></li>
 <li>Live preview in the browser, multi-cursor editing, comments pinned to the preview, a Discussion.</li>
+<li>Select text for a 💬 comment button. <b>discuss</b> in the bar counts what is new; @name tells a person or asks an agent.</li>
+<li>Keys: <code>Ctrl/⌘-K</code> any command, <code>-P</code> open a file, <code>-S</code> save, <code>-Alt-M</code> comment, <code>-B</code>/<code>-I</code> bold/italic, Esc leaves focus.</li>
 <li>Builds run in a sandbox: 2 CPUs, 2 GB, 180 s, no capabilities, public HTTPS only.</li>
 <li>Ctrl-S commits, signs (ML-DSA-65, the key never leaves the device) and pushes. History restores any commit.</li>
-<li>Cite (Ctrl-Alt-C): PubMed and Crossref; BibTeX from the registrar; "Check references" catches made-up ones.</li>
+<li>Cite: PubMed and Crossref; BibTeX from the registrar; "Check references" catches made-up ones.</li>
 <li>Spelling and grammar by Harper, in the browser. Word export with live EndNote fields.</li>
 <li>Upload a <code>.zip</code>/<code>.tar.gz</code> to update a project; File › Download for the sources.</li>
 <li>Paths in Typst start from the file naming them; <code>/fig.svg</code> starts at the project root.</li>
