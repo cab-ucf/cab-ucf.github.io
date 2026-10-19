@@ -8,6 +8,19 @@
   if (!m || !Native) return
   const pre = m[1], enc = new TextEncoder(), dec = new TextDecoder()
   const head = (op, n) => { const h = new Uint8Array(5); h[0] = op; new DataView(h.buffer).setUint32(1, n); return h }
+  // frames off a stream, in a buffer grown by doubling: linear, however it arrives
+  async function* frames(rd) {
+    let buf = new Uint8Array(1 << 16), len = 0, at = 0
+    for (;;) {
+      for (let n; len - at >= 5 && len - at >= 5 + (n = new DataView(buf.buffer).getUint32(at + 1)); at += 5 + n)
+        yield [buf[at], buf.slice(at + 5, at + 5 + n)]
+      const { value, done } = await rd.read()
+      if (done) return
+      if (at) buf.copyWithin(0, at, len), len -= at, at = 0
+      if (len + value.length > buf.length) { const t = new Uint8Array(2 * (len + value.length)); t.set(buf.subarray(0, len)); buf = t }
+      buf.set(value, len); len += value.length
+    }
+  }
   class WS extends EventTarget {
     constructor(url, protocols) {
       const u = new URL(url, location.href)
@@ -28,16 +41,9 @@
         const r = await fetch(this.at + '?path=' + encodeURIComponent(path), { cache: 'no-store' })
         if (!r.ok) throw Error(r.status)
         this.readyState = 1; this.emit('open')
-        const rd = r.body.getReader()
-        for (let buf = new Uint8Array(0); ;) {
-          const { value, done } = await rd.read()
-          if (done) break
-          const b = new Uint8Array(buf.length + value.length); b.set(buf); b.set(value, buf.length); buf = b
-          for (let n; buf.length >= 5 && buf.length >= 5 + (n = new DataView(buf.buffer, buf.byteOffset).getUint32(1));) {
-            const op = buf[0], p = buf.slice(5, 5 + n); buf = buf.slice(5 + n)
-            if (op === 8) return this.emit('close', { code: p.length > 1 ? p[0] << 8 | p[1] : 1005, reason: dec.decode(p.slice(2)), wasClean: true })
-            this.emit('message', { data: op === 1 ? dec.decode(p) : this.binaryType === 'arraybuffer' ? p.buffer : new Blob([p]) })
-          }
+        for await (const [op, p] of frames(r.body.getReader())) {
+          if (op === 8) return this.emit('close', { code: p.length > 1 ? p[0] << 8 | p[1] : 1005, reason: dec.decode(p.slice(2)), wasClean: true })
+          this.emit('message', { data: op === 1 ? dec.decode(p) : this.binaryType === 'arraybuffer' ? p.buffer : new Blob([p]) })
         }
         this.emit('close', { code: 1006, wasClean: false })
       } catch { if (this.readyState < 3) { this.emit('error'); this.emit('close', { code: 1006, wasClean: false }) } }
