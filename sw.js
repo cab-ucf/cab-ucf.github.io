@@ -1,20 +1,22 @@
 // irweb service worker: every fetch under x/<sid>/ becomes one HTTP exchange over iroh.
-// State that must survive SW termination (sid -> seed) lives in the Cache API.
+// State that must survive SW termination (sid -> server id) lives in the Cache API.
 // Classic worker, not an ES module: module service workers need Firefox 147+ and
 // Safari 16.4+, and students arrive on whatever browser they already have.
 const BASE = new URL(self.registration.scope).pathname;           // '/' or '/irweb/'
 // Stamped by web/build.sh from the wasm hash. The glue and the binary are only valid as a
 // matched pair -- a stale one of either throws "__wasm_bindgen_func_elem_N is not a
 // function" -- so both are fetched under this version and the cache is named after it.
-const V = 'b886365df31f';
+const V = '6c7e1b047560';
 const CACHE = 'irweb-bundle-' + V;
 // Pages from before this pairing registered sw.js as a module, where importScripts
 // throws. Their old worker serves that page from its cache forever, so a worker that
 // only ran as classic could never replace it: run as a module too, and retire.
 let classic = true;
 try { importScripts(BASE + 'pkg/irweb_web.js?v=' + V); } catch { classic = false; }
-const { Client } = classic ? wasm_bindgen : {};
-const init = () => wasm_bindgen({ module_or_path: BASE + 'pkg/irweb_web_bg.wasm?v=' + V });
+const { Client, server_id } = classic ? wasm_bindgen : {};
+// Once: a second instantiation racing the first would swap the memory under live objects.
+let ready;
+const init = () => ready ??= wasm_bindgen({ module_or_path: BASE + 'pkg/irweb_web_bg.wasm?v=' + V });
 const BUNDLE = ['', 'index.html', 'sw.js', 'irweb-ws.js', 'pkg/irweb_web.js', 'pkg/irweb_web_bg.wasm'].map(p => BASE + p);
 const REQ_SKIP = new Set(['connection', 'host', 'content-length', 'transfer-encoding', 'keep-alive', 'upgrade']);
 const RES_SKIP = new Set(['connection', 'content-length', 'transfer-encoding', 'keep-alive']);
@@ -28,8 +30,12 @@ self.addEventListener('install', e => e.waitUntil((async () => {
 self.addEventListener('activate', e => e.waitUntil((async () => {
   await self.clients.claim();
   if (classic) {
-    const keep = new Set([CACHE, 'irweb-sites']);
-    return Promise.all((await caches.keys()).filter(k => !keep.has(k)).map(k => caches.delete(k)));
+    const keep = new Set([CACHE, 'irweb-sites']), c = await caches.open('irweb-sites');
+    await Promise.all((await caches.keys()).filter(k => !keep.has(k)).map(k => caches.delete(k)));
+    // Sessions from before only ids were stored hold seeds: forget them.
+    for (const r of await c.keys()) if ((await (await c.match(r)).json()).seed)
+      await Promise.all([c.delete(r), c.delete(r.url.replace('/__site/', '/__jar/'))]);
+    return;
   }
   // Retiring: send each tab back to its link, to be served by the network this time.
   const to = await Promise.all((await self.clients.matchAll({ type: 'window' })).map(async c => {
@@ -46,11 +52,18 @@ self.addEventListener('message', e => {
   if (e.data?.seed) e.waitUntil(newSession(e.data, e.ports[0]));
 });
 
+// Only the server's public id is kept: every site opened through this page can read
+// this storage, and the seed would let any of them pose as the server. It also spares
+// each wake of the worker from stretching a typed code again.
 async function newSession({ seed, relay }, port) {
-  const sid = Array.from(crypto.getRandomValues(new Uint8Array(8)), b => (b % 36).toString(36)).join('');
-  const c = await caches.open('irweb-sites');
-  await c.put(new Request(BASE + '__site/' + sid), new Response(JSON.stringify({ seed, relay })));
-  port.postMessage({ sid });
+  try {
+    await init();
+    const id = server_id(seed);
+    const sid = Array.from(crypto.getRandomValues(new Uint8Array(8)), b => (b % 36).toString(36)).join('');
+    const c = await caches.open('irweb-sites');
+    await c.put(new Request(BASE + '__site/' + sid), new Response(JSON.stringify({ id, relay })));
+    port.postMessage({ sid });
+  } catch (err) { port.postMessage({ error: String(err?.message || err) }); }
 }
 
 // Cookies: a worker is never shown the Cookie header and cannot set cookies from a
@@ -74,11 +87,11 @@ async function site(sid) {
   return r ? r.json() : null;
 }
 
-const clients = new Map();   // seed|relay -> Promise<Client>
+const clients = new Map();   // id|relay -> Promise<Client>
 function client(s) {
-  const k = s.seed + '|' + (s.relay || '');
+  const k = s.id + '|' + (s.relay || '');
   if (!clients.has(k)) {
-    clients.set(k, (async () => { await init(); return Client.connect(s.seed, s.relay || undefined); })()
+    clients.set(k, (async () => { await init(); return Client.connect(s.id, s.relay || undefined); })()
       .catch(async err => {
         clients.delete(k);
         // A glue/binary mismatch means this worker is outdated: an older copy of it is
