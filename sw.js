@@ -5,9 +5,8 @@
 const BASE = new URL(self.registration.scope).pathname;           // '/' or '/irweb/'
 // Stamped by web/build.sh from the wasm hash. The glue and the binary are only valid as a
 // matched pair -- a stale one of either throws "__wasm_bindgen_func_elem_N is not a
-// function" -- so both are fetched under this version and the cache is named after it.
-const V = '6c7e1b047560';
-const CACHE = 'irweb-bundle-' + V;
+// function" -- so both are fetched under this version.
+const V = '4d9e278c054a';
 // Pages from before this pairing registered sw.js as a module, where importScripts
 // throws. Their old worker serves that page from its cache forever, so a worker that
 // only ran as classic could never replace it: run as a module too, and retire.
@@ -17,21 +16,17 @@ const { Client, server_id } = classic ? wasm_bindgen : {};
 // Once: a second instantiation racing the first would swap the memory under live objects.
 let ready;
 const init = () => ready ??= wasm_bindgen({ module_or_path: BASE + 'pkg/irweb_web_bg.wasm?v=' + V });
-const BUNDLE = ['', 'index.html', 'sw.js', 'irweb-ws.js', 'pkg/irweb_web.js', 'pkg/irweb_web_bg.wasm'].map(p => BASE + p);
 const REQ_SKIP = new Set(['connection', 'host', 'content-length', 'transfer-encoding', 'keep-alive', 'upgrade']);
 const RES_SKIP = new Set(['connection', 'content-length', 'transfer-encoding', 'keep-alive']);
 
-self.addEventListener('install', e => e.waitUntil((async () => {
-  // 'reload' or a deploy can be installed straight back out of the HTTP cache.
-  if (classic) await (await caches.open(CACHE)).addAll(BUNDLE.filter(p => !p.endsWith('/'))
-    .concat(BASE).map(u => new Request(u, { cache: 'reload' })));
-  await self.skipWaiting();
-})()));
+self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', e => e.waitUntil((async () => {
   await self.clients.claim();
   if (classic) {
-    const keep = new Set([CACHE, 'irweb-sites']), c = await caches.open('irweb-sites');
-    await Promise.all((await caches.keys()).filter(k => !keep.has(k)).map(k => caches.delete(k)));
+    // The landing page comes from the network, never from caches: every site opened
+    // through it can write those, and a landing page planted there reads each later seed.
+    const c = await caches.open('irweb-sites');
+    await Promise.all((await caches.keys()).filter(k => k !== 'irweb-sites').map(k => caches.delete(k)));
     // Sessions from before only ids were stored hold seeds: forget them.
     for (const r of await c.keys()) if ((await (await c.match(r)).json()).seed)
       await Promise.all([c.delete(r), c.delete(r.url.replace('/__site/', '/__jar/'))]);
@@ -114,14 +109,9 @@ self.addEventListener('fetch', e => {
   e.respondWith(route(e, u).catch(err => new Response('irweb: ' + (err?.message || err), { status: 502 })));
 });
 
-/// The landing page and its wasm, served from the install-time cache.
-const bundle = req => BUNDLE.includes(new URL(req.url).pathname)
-  ? caches.match(req).then(r => r || fetch(req))
-  : fetch(req);
-
 async function route(e, u) {
   const rel = u.pathname.slice(BASE.length);
-  if (rel === 'irweb-ws.js') return bundle(e.request);
+  if (rel === 'irweb-ws.js') return fetch(e.request);
   let sid, path;
   const m = rel.match(/^x\/([a-z0-9]+)(\/.*)?$/);
   if (m) {
@@ -136,7 +126,7 @@ async function route(e, u) {
     const from = (c && c.url) || e.request.referrer || '';
     const mm = from.startsWith(self.location.origin)
       && new URL(from).pathname.slice(BASE.length).match(/^x\/([a-z0-9]+)/);
-    if (!mm) return bundle(e.request);
+    if (!mm) return fetch(e.request);
     // Send navigations back under x/<sid>/ rather than answering at the bare path:
     // the address bar is what the next click resolves against.
     if (e.request.mode === 'navigate') {
