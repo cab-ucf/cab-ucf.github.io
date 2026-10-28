@@ -22,9 +22,9 @@ async function go(frag) {
     const sw = (await navigator.serviceWorker.ready).active;
     const sid = await new Promise((res, rej) => {
       const ch = new MessageChannel();
-      ch.port1.onmessage = ev => res(ev.data.sid);
+      ch.port1.onmessage = ev => ev.data.sid ? res(ev.data.sid) : rej(new Error(ev.data.error));
       sw.postMessage({ seed, relay }, [ch.port2]);
-      setTimeout(() => rej(new Error('service worker did not answer')), 8000);
+      setTimeout(() => rej(new Error('service worker did not answer')), 30000);
     });
     say('Connecting...');
     location.replace(new URL('x/' + sid + '/', base));
