@@ -5,7 +5,7 @@ const BASE = new URL(self.registration.scope).pathname;           // '/' or '/ir
 // Stamped by web/build.sh from a hash of the whole bundle. The glue and the binary are
 // only valid as a matched pair -- a stale one of either throws "__wasm_bindgen_func_elem_N
 // is not a function" -- so both are fetched under this version.
-const V = '8b070e1b4159';
+const V = 'b1f6f652a814';
 // Pages from before this pairing registered sw.js as a module, where importScripts
 // throws. Their old worker serves that page from its cache forever, so a worker that
 // only ran as classic could never replace it: run as a module too, and retire.
