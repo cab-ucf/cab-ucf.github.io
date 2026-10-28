@@ -12,24 +12,23 @@ button{background:#2b6cb0;border:0}#s{color:#aaa;margin-top:1rem;white-space:pre
 const base = new URL('.', location.href), S = document.getElementById('s'), F = document.getElementById('f');
 const say = t => S.textContent = t;
 F.onsubmit = e => { e.preventDefault(); go(document.getElementById('k').value.trim()); };
-async function go(frag) {
+async function go(link) {
   if (!('serviceWorker' in navigator)) return say('This browser has no Service Worker support (private mode?).');
-  const [seed, ...opts] = frag.replace(/^#/, '').split(';');
-  const relay = (opts.find(o => o.startsWith('r=')) || '').slice(2) || undefined;
   try {
     say('Starting...');
     await navigator.serviceWorker.register(new URL('sw.js', base), { scope: base.pathname });
     const sw = (await navigator.serviceWorker.ready).active;
     const sid = await new Promise((res, rej) => {
       const ch = new MessageChannel();
-      ch.port1.onmessage = ev => ev.data.sid ? res(ev.data.sid) : rej(new Error(ev.data.error));
-      sw.postMessage({ seed, relay }, [ch.port2]);
+      ch.port1.onmessage = ev => ev.data.sid ? res(ev.data.sid) : rej(new Error(ev.data.err));
+      sw.postMessage({ link }, [ch.port2]);
       setTimeout(() => rej(new Error('service worker did not answer')), 30000);
     });
     say('Connecting...');
     location.replace(new URL('x/' + sid + '/', base));
   } catch (e) { say('Failed: ' + e.message); F.hidden = false; }
 }
-const h = decodeURIComponent(location.hash.slice(1));
+let h = location.hash.slice(1);
+try { h = decodeURIComponent(h); } catch {}
 if (h) go(h); else F.hidden = false;
 </script>
